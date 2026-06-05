@@ -1,1 +1,16 @@
+# Lokální konfigurace a tajemství (Kritické!)
 avaplace_credentials.json
+
+# Cache a systémové soubory Pythonu
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtuální prostředí (pokud používáš)
+venv/
+env/
+.env
+
+# Systémové soubory
+.DS_Store
+Thumbs.db
