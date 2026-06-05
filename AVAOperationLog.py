@@ -1198,7 +1198,7 @@ with tab_output_queue:
             
             op_id_oq = selected_oq_row.get('operationId')
             if op_id_oq is None:
-                for val in selected_oq_row.values():
+                for val in selected_oq_row:
                     if isinstance(val, dict) and 'operationId' in val:
                         op_id_oq = val['operationId']
                         break
