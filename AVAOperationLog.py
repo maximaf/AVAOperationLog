@@ -823,18 +823,23 @@ with tab_logs:
                             targets = [node_indices[row['severity']] for _, row in sankey_data.iterrows()]
                             values = sankey_data['count'].tolist()
 
-                            # Výpočet doby trvání jednotlivých fází v sekundách
+                            # Výpočet průměrné doby trvání jednotlivých fází v sekundách (počítáno za každou operaci zvlášť)
                             phase_durations = {}
                             for phase in df_clean['operationType'].unique():
                                 phase_df = df_clean[df_clean['operationType'] == phase]
                                 if not phase_df.empty:
-                                    p_min = phase_df['createdOn'].min()
-                                    p_max = phase_df['createdOn'].max()
-                                    if pd.notna(p_min) and pd.notna(p_max):
-                                        dur_sec = (p_max - p_min).total_seconds()
-                                        phase_durations[phase] = f"{dur_sec:.3f} s"
+                                    op_groups = phase_df.groupby('operationId')
+                                    durations = []
+                                    for _, op_df in op_groups:
+                                        p_min = op_df['createdOn'].min()
+                                        p_max = op_df['createdOn'].max()
+                                        if pd.notna(p_min) and pd.notna(p_max):
+                                            durations.append((p_max - p_min).total_seconds())
+                                    if durations:
+                                        avg_dur = sum(durations) / len(durations)
+                                        phase_durations[phase] = f"ø {avg_dur:.3f} s"
                                     else:
-                                        phase_durations[phase] = "N/A"
+                                        phase_durations[phase] = "0.000 s"
                                 else:
                                     phase_durations[phase] = "N/A"
 
