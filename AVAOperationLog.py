@@ -22,7 +22,7 @@ st.set_page_config(
 hide_streamlit_style = """
 <style>
     /* Skrytí horní lišty kompletně i s vyhrazeným místem */
-    header {display: none !important;}
+    xxxxheader {display: none !important;}
     /* Skrytí patičky "Made with Streamlit" */
     footer {display: none !important;}
     /* Odstranění obřího zbytečného prázdného místa nahoře (výchozí padding Streamlitu) */
@@ -38,7 +38,7 @@ hide_streamlit_style = """
         text-shadow: none !important;
         stroke: none !important;
         stroke-width: 0px !important;
-        fill: black !important;
+        fill: white !important;
     }
 </style>
 """
