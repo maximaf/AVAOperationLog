@@ -166,7 +166,9 @@ if 'input_queue_filters' not in st.session_state:
     st.session_state['input_queue_filters'] = {
         'agent_id': '',
         'client_id': '',
-        'status': 'Všechny'
+        'status': 'Všechny',
+        'sourcing_api_version': 'v2',
+        'source_id': ''
     }
 
 # Výstupní fronta (QueryingData)
@@ -288,23 +290,36 @@ def fetch_datasource_info(api_base_url, token, tenant_id, source_id):
 
 def fetch_input_queue(api_url, token, tenant_id, limit, offset, filters=None):
     base_ds_url = api_url.split('/api/v1/OperatingLogs')[0]
-    enqueue_url = f"{base_ds_url}/api/v2/SourcingData/EnqueueData"
-    
+
     headers = {
         'Authorization': f'Bearer {token}',
         'X-Tenant': tenant_id.strip(),
         'Accept': 'application/json'
     }
+
     params = {
         'limit': limit,
         'offset': offset
     }
+
+    # Support for v1 endpoint which requires sourceId as part of URL
+    version = None
+    source_id = None
     if filters:
+        version = filters.get('sourcing_api_version')
+        source_id = filters.get('source_id')
         if filters.get('agent_id'):
             params['agentId'] = filters['agent_id'].strip()
         if filters.get('client_id'):
             params['clientId'] = filters['client_id'].strip()
-            
+
+    if version == 'v1':
+        if not source_id or not str(source_id).strip():
+            raise ValueError('Source ID is required for v1 SourcingData endpoint')
+        enqueue_url = f"{base_ds_url}/api/v1/SourcingData/EnqueueDataBySourceId/{str(source_id).strip()}"
+    else:
+        enqueue_url = f"{base_ds_url}/api/v2/SourcingData/EnqueueData"
+
     response = requests.get(enqueue_url, headers=headers, params=params, timeout=15)
     response.raise_for_status()
     return response.json()
@@ -403,10 +418,10 @@ def show_login_dialog():
     env_creds = config.get(selected_env, {"tenant_id": "", "client_id": "", "client_secret": "", "scope": ""})
     
     st.markdown("---")
-    tenant_id = st.text_input("Tenant ID (tid):", value=env_creds.get('tenant_id', ''))
-    client_id = st.text_input("Client ID:", value=env_creds.get('client_id', ''))
-    client_secret = st.text_input("Client Secret:", type="password", value=env_creds.get('client_secret', ''))
-    scope = st.text_input("Scope (volitelné):", value=env_creds.get('scope', ''))
+    tenant_id = st.text_input("Tenant ID (tid):", value=env_creds.get('tenant_id', ''), key="login_tenant_id")
+    client_id = st.text_input("Client ID:", value=env_creds.get('client_id', ''), key="login_client_id")
+    client_secret = st.text_input("Client Secret:", type="password", value=env_creds.get('client_secret', ''), key="login_client_secret")
+    scope = st.text_input("Scope (volitelné):", value=env_creds.get('scope', ''), key="login_scope")
     
     if st.button("Uložit do prohlížeče a přihlásit se", width="stretch"):
         config[selected_env] = {
@@ -505,7 +520,7 @@ with tab_logs:
 
         f_col1, f_col2, f_col3 = st.columns([2, 1, 1])
         with f_col1:
-            api_op_id = st.text_input("Operation ID:", value=st.session_state['api_filters']['operationId'])
+            api_op_id = st.text_input("Operation ID:", value=st.session_state['api_filters']['operationId'], key="api_operation_id")
         with f_col2:
             api_sev = st.selectbox("Minimální závažnost:", ["Všechny", "Info", "Warning", "Error"],
                                    index=["Všechny", "Info", "Warning", "Error"].index(st.session_state['api_filters']['severity_level']))
@@ -514,10 +529,10 @@ with tab_logs:
             api_sys = st.checkbox("IncludeSystemLevel", value=st.session_state['api_filters']['include_system'])
 
         a_col1, a_col2, a_col3, a_col4 = st.columns(4)
-        with a_col1: api_agent_code = st.text_input("Agent Code:", value=st.session_state['api_filters']['agent_code'])
-        with a_col2: api_agent_id = st.text_input("Agent ID:", value=st.session_state['api_filters']['agent_id'])
-        with a_col3: api_source_id = st.text_input("Source ID:", value=st.session_state['api_filters']['source_id'])
-        with a_col4: api_op_scope = st.text_input("Operation Scope:", value=st.session_state['api_filters']['op_scope'])
+        with a_col1: api_agent_code = st.text_input("Agent Code:", value=st.session_state['api_filters']['agent_code'], key="api_agent_code")
+        with a_col2: api_agent_id = st.text_input("Agent ID:", value=st.session_state['api_filters']['agent_id'], key="api_agent_id")
+        with a_col3: api_source_id = st.text_input("Source ID:", value=st.session_state['api_filters']['source_id'], key="api_source_id")
+        with a_col4: api_op_scope = st.text_input("Operation Scope:", value=st.session_state['api_filters']['op_scope'], key="api_operation_scope")
 
         st.markdown("---")
 
@@ -928,10 +943,20 @@ with tab_input_queue:
     with st.expander("📡 Filtry vstupní fronty", expanded=True):
         iq_col1, iq_col2 = st.columns(2)
         with iq_col1:
-            iq_agent_id = st.text_input("Agent ID (Enqueue):", value=st.session_state['input_queue_filters']['agent_id'])
+            iq_agent_id = st.text_input("Agent ID (Enqueue):", value=st.session_state['input_queue_filters']['agent_id'], key="iq_agent_id")
         with iq_col2:
-            iq_client_id = st.text_input("Client ID (Enqueue):", value=st.session_state['input_queue_filters']['client_id'])
-            
+            iq_client_id = st.text_input("Client ID (Enqueue):", value=st.session_state['input_queue_filters']['client_id'], key="iq_client_id")
+
+        # Version selection for SourcingData endpoint
+        v_col1, v_col2 = st.columns([1, 2])
+        with v_col1:
+            iq_version = st.selectbox("Endpoint verze:", ["v2", "v1"], index=["v2", "v1"].index(st.session_state['input_queue_filters'].get('sourcing_api_version', 'v2')))
+        with v_col2:
+            if iq_version == 'v1':
+                iq_source_id = st.text_input("Source ID (pro v1 je povinné):", value=st.session_state['input_queue_filters'].get('source_id', ''), key="iq_source_id")
+            else:
+                iq_source_id = st.text_input("Source ID (volitelné):", value=st.session_state['input_queue_filters'].get('source_id', ''), key="iq_source_id")
+
         iq_status = st.selectbox("Filtrovat stav (lokálně):", ["Všechny", "Success", "Failed", "Pending", "Canceled"],
                                  index=["Všechny", "Success", "Failed", "Pending", "Canceled"].index(st.session_state['input_queue_filters']['status']))
         
@@ -939,7 +964,9 @@ with tab_input_queue:
             st.session_state['input_queue_filters'] = {
                 'agent_id': iq_agent_id,
                 'client_id': iq_client_id,
-                'status': iq_status
+                'status': iq_status,
+                'sourcing_api_version': iq_version,
+                'source_id': iq_source_id
             }
             st.session_state['input_queue_offset'] = 0
             st.session_state['input_queue_items'] = []
@@ -965,19 +992,24 @@ with tab_input_queue:
     # Auto-fetch if empty
     if not st.session_state['input_queue_items'] and st.session_state['access_token']:
         try:
-            with st.spinner("Automatické načítání vstupní fronty..."):
-                data = fetch_input_queue(
-                    st.session_state['credentials']['api_url'],
-                    st.session_state['access_token'],
-                    st.session_state['credentials']['tenant_id'],
-                    limit=100,
-                    offset=0,
-                    filters=st.session_state['input_queue_filters']
-                )
-                if isinstance(data, dict) and 'items' in data:
-                    st.session_state['input_queue_items'] = data['items']
-                elif isinstance(data, list):
-                    st.session_state['input_queue_items'] = data
+            # Respect v1 requirement: do not auto-fetch if v1 selected but source_id missing
+            iq_filters = st.session_state['input_queue_filters']
+            if iq_filters.get('sourcing_api_version') == 'v1' and not iq_filters.get('source_id'):
+                st.info("Automatické načítání je vypnuto pro v1 endpoint bez vyplněného Source ID.")
+            else:
+                with st.spinner("Automatické načítání vstupní fronty..."):
+                    data = fetch_input_queue(
+                        st.session_state['credentials']['api_url'],
+                        st.session_state['access_token'],
+                        st.session_state['credentials']['tenant_id'],
+                        limit=100,
+                        offset=0,
+                        filters=st.session_state['input_queue_filters']
+                    )
+                    if isinstance(data, dict) and 'items' in data:
+                        st.session_state['input_queue_items'] = data['items']
+                    elif isinstance(data, list):
+                        st.session_state['input_queue_items'] = data
         except Exception as e:
             st.info(f"Pro načtení dat klikněte na tlačítko výše. (Detail chyby: {e})")
 
@@ -1064,6 +1096,41 @@ with tab_input_queue:
             if sel_idx < len(df_iq_display):
                 selected_iq_row = df_iq_display.iloc[sel_idx]
                 
+        # --- Vizualizace: Doba zpracování (line + histogram) ---
+        try:
+            if not df_iq.empty:
+                # použijeme surová data (UTC) se spočtenou "Doba zpracování (s)"
+                df_times = df_iq[pd.notna(df_iq['createdOn']) & pd.notna(df_iq['Doba zpracování (s)'])].copy()
+                if not df_times.empty:
+                    df_times = df_times.sort_values(by='createdOn', ascending=True).reset_index(drop=True)
+
+                    # Line chart: doba zpracování v čase (v místním časovém pásmu)
+                    df_times['created_local'] = df_times['createdOn'].dt.tz_convert('Europe/Prague')
+                    fig_line = px.line(
+                        df_times,
+                        x='created_local',
+                        y='Doba zpracování (s)',
+                        markers=True,
+                        title='Doba zpracování podle času'
+                    )
+                    fig_line.update_layout(height=300, xaxis_title='Čas (Europe/Prague)', yaxis_title='Doba zpracování (s)', margin=dict(l=20, r=20, t=30, b=20))
+                    st.plotly_chart(fig_line, use_container_width=True)
+
+                    # Histogram: explicitní intervaly (sekundy)
+                    bins = [0, 5, 15, 60, 300, 900, 3600, float('inf')]
+                    labels = ['0–5 s', '5–15 s', '15–60 s', '1–5 min', '5–15 min', '15–60 min', '>60 min']
+                    df_times['dur_bucket'] = pd.cut(df_times['Doba zpracování (s)'], bins=bins, labels=labels, right=False)
+                    counts = df_times['dur_bucket'].value_counts().reindex(labels, fill_value=0)
+
+                    fig_hist = px.bar(x=labels, y=counts.values, title='Histogram dob zpracování', text=counts.values)
+                    fig_hist.update_layout(height=300, xaxis_title='Interval', yaxis_title='Počet', margin=dict(l=20, r=20, t=30, b=20))
+                    fig_hist.update_traces(texttemplate='%{text}', textposition='outside')
+                    st.plotly_chart(fig_hist, use_container_width=True)
+                else:
+                    st.info("Nebyly nalezeny platné záznamy s výpočtem doby zpracování pro vykreslení grafu.")
+        except Exception as e:
+            st.error(f"Chyba při vykreslování grafů doby zpracování: {e}")
+
         if selected_iq_row is not None:
             st.markdown("#### 🔍 Detail vybrané položky")
             
@@ -1114,13 +1181,13 @@ with tab_output_queue:
     with st.expander("📡 Filtry výstupní fronty", expanded=True):
         oq_col1, oq_col2 = st.columns(2)
         with oq_col1:
-            oq_model_id = st.text_input("Data Model ID (povinné):", value=st.session_state['output_queue_filters']['model_id'])
+            oq_model_id = st.text_input("Data Model ID (povinné):", value=st.session_state['output_queue_filters']['model_id'], key="oq_model_id")
         with oq_col2:
-            oq_source_id = st.text_input("Source ID (volitelné):", value=st.session_state['output_queue_filters']['source_id'])
+            oq_source_id = st.text_input("Source ID (volitelné):", value=st.session_state['output_queue_filters']['source_id'], key="oq_source_id")
             
         oq_col3, oq_col4 = st.columns(2)
         with oq_col3:
-            oq_mandant = st.text_input("Mandant Code (volitelné):", value=st.session_state['output_queue_filters']['mandant_code'])
+            oq_mandant = st.text_input("Mandant Code (volitelné):", value=st.session_state['output_queue_filters']['mandant_code'], key="oq_mandant_code")
         with oq_col4:
             st.markdown("<br>", unsafe_allow_html=True)
             oq_use_time = st.checkbox("Omezit datum modifikace", value=st.session_state['output_queue_filters']['use_time'], key="oq_use_time")
