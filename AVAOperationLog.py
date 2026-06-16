@@ -190,6 +190,12 @@ if 'usage_stats_items' not in st.session_state:
     st.session_state['usage_stats_items'] = []
 if 'usage_stats_application_code' not in st.session_state:
     st.session_state['usage_stats_application_code'] = ''
+if 'usage_stats_application_options' not in st.session_state:
+    st.session_state['usage_stats_application_options'] = []
+if 'usage_stats_tenant_app_items' not in st.session_state:
+    st.session_state['usage_stats_tenant_app_items'] = []
+if 'usage_stats_include_smart_check_status' not in st.session_state:
+    st.session_state['usage_stats_include_smart_check_status'] = False
 
 # Výchozí stav pro serverové filtry
 if 'api_filters' not in st.session_state:
@@ -364,6 +370,33 @@ def fetch_usage_statistics(api_url, token, tenant_id, application_code):
     params = {}
     if application_code and application_code.strip():
         params['applicationCode'] = application_code.strip()
+    response = requests.get(usage_url, headers=headers, params=params, timeout=15)
+    response.raise_for_status()
+    return response.json()
+
+def fetch_integrated_applications(api_url, token, tenant_id):
+    base_ds_url = api_url.split('/api/v1/OperatingLogs')[0]
+    apps_url = f"{base_ds_url}/api/v1/IntegratedApplications?limit=333"
+    headers = {
+        'Authorization': f'Bearer {token}',
+        'X-Tenant': tenant_id.strip(),
+        'Accept': 'application/json'
+    }
+    response = requests.get(apps_url, headers=headers, timeout=15)
+    response.raise_for_status()
+    return response.json()
+
+def fetch_applications_used_by_tenants(api_url, token, tenant_id, include_smart_check_status=False):
+    base_ds_url = api_url.split('/api/v1/OperatingLogs')[0]
+    usage_url = f"{base_ds_url}/api/v1/UsageStatistics/GetApplicationsUsedByTenants"
+    headers = {
+        'Authorization': f'Bearer {token}',
+        'X-Tenant': tenant_id.strip(),
+        'Accept': 'application/json'
+    }
+    params = {
+        'includeSmartCheckStatus': 'true' if include_smart_check_status else 'false'
+    }
     response = requests.get(usage_url, headers=headers, params=params, timeout=15)
     response.raise_for_status()
     return response.json()
@@ -1351,50 +1384,174 @@ with tab_output_queue:
 
 
 with tab_usage_stats:
-    st.markdown("### 📈 Použití (UsageStatistics)")
-    st.info("Poznámka: statistika použití je dostupná pouze pro ASOL prostředí.")
-    application_code = st.text_input("Application Code:", value=st.session_state['usage_stats_application_code'])
+    st.markdown("### 📈 Statistika použití (UsageStatistics)")
+    st.info("Poznámka: statistika použití je dostupná pouze pro ASOLEU připojení.")
 
-    if st.button("🚀 Načíst statistiku použití", key="btn_load_usage_stats"):
-        if not application_code.strip():
-            st.error("Zadejte prosím 'Application Code' pro načtení statistik použití.")
-        else:
-            st.session_state['usage_stats_application_code'] = application_code.strip()
-            st.session_state['usage_stats_items'] = []
-            with st.spinner("Načítám UsageStatistics ..."):
+    with st.expander("🔹 Statistika použití podle aplikace", expanded=True):
+        if 'usage_stats_application_options' not in st.session_state:
+            st.session_state['usage_stats_application_options'] = []
+
+        application_options = st.session_state['usage_stats_application_options']
+        if not application_options:
+            try:
+                with st.spinner("Načítám seznam aplikací ..."):
+                    integrated_apps_data = fetch_integrated_applications(
+                        st.session_state['credentials']['api_url'],
+                        st.session_state['access_token'],
+                        st.session_state['credentials']['tenant_id']
+                    )
+                if isinstance(integrated_apps_data, dict) and 'items' in integrated_apps_data:
+                    app_items = integrated_apps_data['items']
+                elif isinstance(integrated_apps_data, list):
+                    app_items = integrated_apps_data
+                else:
+                    app_items = []
+                application_options = [item.get('code') for item in app_items if isinstance(item, dict) and item.get('code')]
+                st.session_state['usage_stats_application_options'] = application_options
+            except Exception as e:
+                st.error(f"Nelze načíst seznam aplikací: {e}")
+                application_options = []
+
+        application_code_options = ["-- Vyberte aplikaci --"] + application_options
+        selected_index = 0
+        if st.session_state['usage_stats_application_code'] in application_options:
+            selected_index = application_options.index(st.session_state['usage_stats_application_code']) + 1
+        application_code = st.selectbox("Application Code:", options=application_code_options, index=selected_index)
+        if application_code == "-- Vyberte aplikaci --":
+            application_code = ""
+
+        if st.button("🚀 Načíst statistiku použití", key="btn_load_usage_stats"):
+            if not application_code.strip():
+                st.error("Zadejte prosím 'Application Code' pro načtení statistik použití.")
+            else:
+                st.session_state['usage_stats_application_code'] = application_code.strip()
+                st.session_state['usage_stats_items'] = []
+                with st.spinner("Načítám UsageStatistics ..."):
+                    try:
+                        usage_data = fetch_usage_statistics(
+                            st.session_state['credentials']['api_url'],
+                            st.session_state['access_token'],
+                            st.session_state['credentials']['tenant_id'],
+                            application_code
+                        )
+                        if isinstance(usage_data, dict) and 'items' in usage_data:
+                            st.session_state['usage_stats_items'] = usage_data['items']
+                        elif isinstance(usage_data, list):
+                            st.session_state['usage_stats_items'] = usage_data
+                        else:
+                            st.session_state['usage_stats_items'] = []
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Načtení UsageStatistics selhalo: {e}")
+
+        if st.session_state['usage_stats_items']:
+            df_usage = pd.DataFrame(st.session_state['usage_stats_items'])
+            desired_columns = ['tenantName', 'tenantId', 'ownerOrgName', 'ownerOrgCode', 'ownerOrgId']
+            df_usage = df_usage[[c for c in desired_columns if c in df_usage.columns]].copy()
+            st.markdown("#### 🗂️ Tenanti používající aplikaci " + application_code.strip())
+            st.dataframe(
+                df_usage,
+                width="stretch",
+                hide_index=True,
+                column_config={
+                    'tenantName': st.column_config.TextColumn(label='Název tenanta\n(tenantName)'),
+                    'tenantId': st.column_config.TextColumn(label='Id tenanta\n(tenantId)'),
+                    'ownerOrgName': st.column_config.TextColumn(label='Název organizace\n(ownerOrgName)'),
+                    'ownerOrgCode': st.column_config.TextColumn(label='Kód organizace\n(ownerOrgCode)'),
+                    'ownerOrgId': st.column_config.TextColumn(label='Id organizace\n(ownerOrgId)')
+                }
+            )
+        elif application_code.strip():
+            st.warning("Pro zadaný Application Code nebyla nalezena žádná data UsageStatistics.")
+
+    with st.expander("🔹 Statistika aplikací používaných tenanty", expanded=False):
+        include_smart_check_status = st.checkbox(
+            "Zobrazit smart check statusy (Healthy/Degraded/Unhealthy)",
+            value=st.session_state['usage_stats_include_smart_check_status'],
+            key="usage_stats_include_smart_check_status"
+        )
+
+        if st.button("🚀 Načíst statistiku aplikací podle tenantů", key="btn_load_usage_stats_tenants"):
+            st.session_state['usage_stats_tenant_app_items'] = []
+            with st.spinner("Načítám UsageStatistics tenant-app ..."):
                 try:
-                    usage_data = fetch_usage_statistics(
+                    tenant_app_data = fetch_applications_used_by_tenants(
                         st.session_state['credentials']['api_url'],
                         st.session_state['access_token'],
                         st.session_state['credentials']['tenant_id'],
-                        application_code
+                        include_smart_check_status=include_smart_check_status
                     )
-                    if isinstance(usage_data, dict) and 'items' in usage_data:
-                        st.session_state['usage_stats_items'] = usage_data['items']
-                    elif isinstance(usage_data, list):
-                        st.session_state['usage_stats_items'] = usage_data
+                    if isinstance(tenant_app_data, dict) and 'items' in tenant_app_data:
+                        st.session_state['usage_stats_tenant_app_items'] = tenant_app_data['items']
+                    elif isinstance(tenant_app_data, list):
+                        st.session_state['usage_stats_tenant_app_items'] = tenant_app_data
                     else:
-                        st.session_state['usage_stats_items'] = []
+                        st.session_state['usage_stats_tenant_app_items'] = []
                     st.rerun()
                 except Exception as e:
-                    st.error(f"Načtení UsageStatistics selhalo: {e}")
+                    st.error(f"Načtení statistik aplikací selhalo: {e}")
 
-    if st.session_state['usage_stats_items']:
-        df_usage = pd.DataFrame(st.session_state['usage_stats_items'])
-        desired_columns = ['tenantName', 'tenantId', 'ownerOrgName', 'ownerOrgCode', 'ownerOrgId']
-        df_usage = df_usage[[c for c in desired_columns if c in df_usage.columns]].copy()
-        st.markdown("#### 🗂️ Tenanti používající aplikaci " + application_code.strip())
-        st.dataframe(
-            df_usage,
-            width="stretch",
-            hide_index=True,
-            column_config={
-                'tenantName': st.column_config.TextColumn(label='Název tenanta\n(tenantName)'),
-                'tenantId': st.column_config.TextColumn(label='Id tenanta\n(tenantId)'),
-                'ownerOrgName': st.column_config.TextColumn(label='Název organizace\n(ownerOrgName)'),
-                'ownerOrgCode': st.column_config.TextColumn(label='Kód organizace\n(ownerOrgCode)'),
-                'ownerOrgId': st.column_config.TextColumn(label='Id organizace\n(ownerOrgId)')
-            }
-        )
-    elif application_code.strip():
-        st.warning("Pro zadaný Application Code nebyla nalezena žádná data UsageStatistics.")
+        if st.session_state['usage_stats_tenant_app_items']:
+            df_tenant_apps = pd.DataFrame(st.session_state['usage_stats_tenant_app_items'])
+            visible_columns = ['tenantName', 'tenantId', 'ownerOrgName', 'ownerOrgCode', 'ownerOrgId', 'smartCheckStatus', 'smartCheckResultId', 'smartCheckCreatedOn']
+            display_columns = [c for c in visible_columns if c in df_tenant_apps.columns]
+            if display_columns:
+                st.markdown("#### 🗂️ Data použití aplikací podle tenantů")
+                st.dataframe(df_tenant_apps[display_columns], width="stretch", hide_index=True)
+
+            if st.session_state['usage_stats_include_smart_check_status']:
+                app_rows = []
+                for item in st.session_state['usage_stats_tenant_app_items']:
+                    applications = item.get('applications') if isinstance(item, dict) else None
+                    if isinstance(applications, list):
+                        for app in applications:
+                            if isinstance(app, dict):
+                                app_rows.append({
+                                    'applicationCode': app.get('applicationCode'),
+                                    'smartCheckStatus': app.get('smartCheckStatus')
+                                })
+                if app_rows:
+                    df_apps = pd.DataFrame(app_rows).dropna(subset=['applicationCode', 'smartCheckStatus'])
+                    if not df_apps.empty:
+                        status_order = ['Healthy', 'Degraded', 'Unhealthy']
+                        df_apps['smartCheckStatus'] = pd.Categorical(df_apps['smartCheckStatus'], categories=status_order, ordered=True)
+                        df_apps_grouped = df_apps.groupby(['applicationCode', 'smartCheckStatus']).size().reset_index(name='count')
+                        fig = px.bar(
+                            df_apps_grouped,
+                            x='applicationCode',
+                            y='count',
+                            color='smartCheckStatus',
+                            category_orders={'smartCheckStatus': status_order},
+                            labels={'applicationCode': 'Application Code', 'count': 'Počet', 'smartCheckStatus': 'SmartCheck status'},
+                            title='SmartCheck statusy aplikací (agregováno přes všechny tenanty)',
+                            barmode='group'
+                        )
+                        fig.update_layout(xaxis_tickangle=-45, xaxis={'categoryorder':'total descending'})
+                        st.plotly_chart(fig, use_container_width=True)
+                    else:
+                        st.info("Žádná data smart check statusů aplikací k zobrazení.")
+                else:
+                    st.info("Žádná data smart check aplikací k zobrazení.")
+            else:
+                tenant_app_counts = []
+                for item in st.session_state['usage_stats_tenant_app_items']:
+                    tenant_name = item.get('tenantName') or item.get('tenantId') or 'Neznámý tenant'
+                    applications = item.get('applications') if isinstance(item, dict) else None
+                    if isinstance(applications, list):
+                        tenant_app_counts.append({
+                            'tenant': tenant_name,
+                            'app_count': len(applications)
+                        })
+                if tenant_app_counts:
+                    df_tenant_counts = pd.DataFrame(tenant_app_counts)
+                    df_tenant_counts = df_tenant_counts.groupby('tenant', as_index=False)['app_count'].sum()
+                    fig = px.pie(
+                        df_tenant_counts,
+                        names='tenant',
+                        values='app_count',
+                        title='Počet aplikací použitých v rámci jednotlivých tenantů',
+                        hole=0.4
+                    )
+                    st.plotly_chart(fig, use_container_width=True)
+                else:
+                    st.info("Žádná data o počtech aplikací na tenanta k zobrazení.")
