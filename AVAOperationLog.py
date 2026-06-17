@@ -1170,16 +1170,93 @@ with tab_input_queue:
                     fig_line.update_layout(height=300, xaxis_title='Čas (Europe/Prague)', yaxis_title='Doba zpracování (s)', margin=dict(l=20, r=20, t=30, b=20))
                     st.plotly_chart(fig_line, use_container_width=True)
 
-                    # Histogram: explicitní intervaly (sekundy)
-                    bins = [0, 5, 15, 60, 300, 900, 3600, float('inf')]
-                    labels = ['0–5 s', '5–15 s', '15–60 s', '1–5 min', '5–15 min', '15–60 min', '>60 min']
-                    df_times['dur_bucket'] = pd.cut(df_times['Doba zpracování (s)'], bins=bins, labels=labels, right=False)
-                    counts = df_times['dur_bucket'].value_counts().reindex(labels, fill_value=0)
-
-                    fig_hist = px.bar(x=labels, y=counts.values, title='Histogram dob zpracování', text=counts.values)
-                    fig_hist.update_layout(height=300, xaxis_title='Interval', yaxis_title='Počet', margin=dict(l=20, r=20, t=30, b=20))
-                    fig_hist.update_traces(texttemplate='%{text}', textposition='outside')
-                    st.plotly_chart(fig_hist, use_container_width=True)
+                    # Histogram dob zpracování
+                    st.markdown("##### 📊 Histogram dob zpracování")
+                    
+                    h_col1, h_col2, h_col3 = st.columns([2, 2, 1])
+                    with h_col1:
+                        hist_type = st.radio(
+                            "Intervaly histogramu:",
+                            ["Dynamické (přizpůsobené datům)", "Pevné (původní)"],
+                            horizontal=True,
+                            key="iq_hist_type"
+                        )
+                    
+                    if hist_type == "Dynamické (přizpůsobené datům)":
+                        with h_col2:
+                            max_percentile = st.slider(
+                                "Odfiltrovat extrémní hodnoty (percentil):",
+                                min_value=50, max_value=100, value=95, step=1,
+                                help="Omezí zobrazený rozsah na zadané procento nejrychlejších zpracování. Např. 95 % odfiltruje 5 % nejpomalejších událostí (outlierů), aby byl graf čitelný."
+                            )
+                        with h_col3:
+                            num_bins = st.number_input(
+                                "Počet sloupců:",
+                                min_value=5, max_value=50, value=15, step=5,
+                                key="iq_num_bins"
+                            )
+                            
+                        df_times_filtered = df_times.copy()
+                        if max_percentile < 100:
+                            cutoff = df_times['Doba zpracování (s)'].quantile(max_percentile / 100.0)
+                            df_times_filtered = df_times[df_times['Doba zpracování (s)'] <= cutoff].copy()
+                            
+                        if not df_times_filtered.empty:
+                            if df_times_filtered['Doba zpracování (s)'].nunique() <= 1:
+                                single_val = df_times_filtered['Doba zpracování (s)'].iloc[0]
+                                labels_vals = [f"{single_val:.2f} s"]
+                                counts_vals = [len(df_times_filtered)]
+                            else:
+                                df_times_filtered['dur_bucket'] = pd.cut(df_times_filtered['Doba zpracování (s)'], bins=num_bins)
+                                counts = df_times_filtered['dur_bucket'].value_counts().sort_index()
+                                rng = df_times_filtered['Doba zpracování (s)'].max() - df_times_filtered['Doba zpracování (s)'].min()
+                                decimals = 2 if rng >= 0.1 else 4
+                                labels_vals = []
+                                for interval in counts.index:
+                                    left = max(0.0, round(interval.left, decimals))
+                                    right = round(interval.right, decimals)
+                                    labels_vals.append(f"{left}–{right} s")
+                                counts_vals = counts.values
+                                
+                            title_suffix = f" (do {cutoff:.2f} s, zobrazeno {len(df_times_filtered)}/{len(df_times)} položek)" if max_percentile < 100 else f" (zobrazeno {len(df_times_filtered)} položek)"
+                            fig_hist = px.bar(
+                                x=labels_vals, 
+                                y=counts_vals, 
+                                title=f'Histogram dob zpracování{title_suffix}', 
+                                text=counts_vals
+                            )
+                        else:
+                            fig_hist = None
+                            st.info("Žádná data pro vybraný percentil.")
+                    else:
+                        # Pevné intervaly (původní)
+                        bins = [0, 5, 15, 60, 300, 900, 3600, float('inf')]
+                        labels = ['0–5 s', '5–15 s', '15–60 s', '1–5 min', '5–15 min', '15–60 min', '>60 min']
+                        df_times['dur_bucket'] = pd.cut(df_times['Doba zpracování (s)'], bins=bins, labels=labels, right=False)
+                        counts = df_times['dur_bucket'].value_counts().reindex(labels, fill_value=0)
+                        labels_vals = labels
+                        counts_vals = counts.values
+                        
+                        fig_hist = px.bar(
+                            x=labels_vals, 
+                            y=counts_vals, 
+                            title='Histogram dob zpracování (pevné intervaly)', 
+                            text=counts_vals
+                        )
+                        
+                    if fig_hist is not None:
+                        fig_hist.update_layout(
+                            height=300, 
+                            xaxis_title='Interval', 
+                            yaxis_title='Počet', 
+                            margin=dict(l=20, r=20, t=30, b=20)
+                        )
+                        fig_hist.update_traces(
+                            texttemplate='%{text}', 
+                            textposition='outside',
+                            marker_color='#29b6f6'
+                        )
+                        st.plotly_chart(fig_hist, use_container_width=True)
                 else:
                     st.info("Nebyly nalezeny platné záznamy s výpočtem doby zpracování pro vykreslení grafu.")
         except Exception as e:
@@ -1473,12 +1550,13 @@ with tab_usage_stats:
                     app_items = integrated_apps_data
                 else:
                     app_items = []
-                application_options = [item.get('code') for item in app_items if isinstance(item, dict) and item.get('code')]
+                application_options = sorted([item.get('code') for item in app_items if isinstance(item, dict) and item.get('code')], key=lambda x: str(x).lower())
                 st.session_state['usage_stats_application_options'] = application_options
             except Exception as e:
                 st.error(f"Nelze načíst seznam aplikací: {e}")
                 application_options = []
 
+        application_options = sorted(application_options, key=lambda x: str(x).lower())
         application_code_options = ["-- Vyberte aplikaci --"] + application_options
         selected_index = 0
         if st.session_state['usage_stats_application_code'] in application_options:
