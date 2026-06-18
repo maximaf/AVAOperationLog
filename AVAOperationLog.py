@@ -11,6 +11,22 @@ import hashlib
 import base64
 import extra_streamlit_components as stx
 
+def get_status_badge(status):
+    if not status or pd.isna(status):
+        return '⚪ Neuvedeno'
+    s = str(status).strip()
+    if s == 'Healthy':
+        return '🟢 Healthy'
+    elif s == 'Degraded':
+        return '🟡 Degraded'
+    elif s == 'Unhealthy':
+        return '🔴 Unhealthy'
+    elif s == 'Neuvedeno':
+        return '⚪ Neuvedeno'
+    if s.startswith('🟢') or s.startswith('🟡') or s.startswith('🔴') or s.startswith('⚪'):
+        return s
+    return f'⚪ {s}'
+
 # Inicializace CookieManageru pro ukládání přihlašovacích údajů v prohlížeči
 cookie_manager = stx.CookieManager()
 
@@ -1662,11 +1678,20 @@ with tab_tenant_stats:
 
         # Lokální filtrování podle stavu SmartChecku
         if 'smartCheckStatus' in df_tenant_apps.columns:
-            # Doplníme chybějící hodnoty za 'Neuvedeno'
-            df_tenant_apps['smartCheckStatus'] = df_tenant_apps['smartCheckStatus'].fillna('Neuvedeno')
+            # Doplníme chybějící hodnoty za 'Neuvedeno' a převedeme na badges
+            df_tenant_apps['smartCheckStatus'] = df_tenant_apps['smartCheckStatus'].fillna('Neuvedeno').apply(get_status_badge)
             
-            # Získáme unikátní stavy
-            available_statuses = sorted(list(df_tenant_apps['smartCheckStatus'].unique()))
+            # Získáme unikátní stavy seřazené podle závažnosti
+            severity_order = {
+                '🟢 Healthy': 1,
+                '🟡 Degraded': 2,
+                '🔴 Unhealthy': 3,
+                '⚪ Neuvedeno': 4
+            }
+            available_statuses = sorted(
+                list(df_tenant_apps['smartCheckStatus'].unique()),
+                key=lambda x: severity_order.get(x, 99)
+            )
             
             # Výběrový box pro filtrování
             selected_statuses = st.multiselect(
@@ -1726,6 +1751,10 @@ with tab_tenant_stats:
                 if 'applicationCode' in df_apps_in_tenant.columns:
                     df_apps_in_tenant = df_apps_in_tenant.sort_values(by='applicationCode', key=lambda x: x.str.lower()).reset_index(drop=True)
                     
+                # Mapovat statusy na badges
+                if 'smartCheckStatus' in df_apps_in_tenant.columns:
+                    df_apps_in_tenant['smartCheckStatus'] = df_apps_in_tenant['smartCheckStatus'].fillna('Neuvedeno').apply(get_status_badge)
+                    
                 # Zobrazit všechny dostupné atributy dynamicky (preferujeme důležité jako první)
                 preferred_cols = ['applicationId', 'id', 'applicationCode', 'smartCheckStatus', 'smartCheckResultId', 'smartCheckCreatedOn']
                 display_cols = [c for c in preferred_cols if c in df_apps_in_tenant.columns]
@@ -1764,16 +1793,30 @@ with tab_tenant_stats:
             if app_rows:
                 df_apps = pd.DataFrame(app_rows).dropna(subset=['applicationCode', 'smartCheckStatus'])
                 if not df_apps.empty:
-                    status_order = ['Healthy', 'Degraded', 'Unhealthy']
+                    df_apps['smartCheckStatus'] = df_apps['smartCheckStatus'].apply(get_status_badge)
+                    status_order = ['🟢 Healthy', '🟡 Degraded', '🔴 Unhealthy', '⚪ Neuvedeno']
                     df_apps['smartCheckStatus'] = pd.Categorical(df_apps['smartCheckStatus'], categories=status_order, ordered=True)
-                    df_apps_grouped = df_apps.groupby(['applicationCode', 'smartCheckStatus']).size().reset_index(name='count')
+                    df_apps_grouped = df_apps.groupby(['applicationCode', 'smartCheckStatus'], observed=False).size().reset_index(name='count')
+                    
+                    # Filtrujeme pouze kombinace s nenulovým počtem
+                    df_apps_grouped = df_apps_grouped[df_apps_grouped['count'] > 0]
+                    
+                    # Definování barev dle požadavku: Healthy=zelená, Degraded=oranžová, Unhealthy=červená
+                    color_map = {
+                        '🟢 Healthy': '#2e7d32',   # Zelená
+                        '🟡 Degraded': '#ef6c00',  # Oranžová
+                        '🔴 Unhealthy': '#c62828', # Červená
+                        '⚪ Neuvedeno': '#78909c'  # Šedá
+                    }
+                    
                     fig = px.bar(
                         df_apps_grouped,
                         x='applicationCode',
                         y='count',
                         color='smartCheckStatus',
+                        color_discrete_map=color_map,
                         category_orders={'smartCheckStatus': status_order},
-                        labels={'applicationCode': 'Application Code', 'count': 'Počet', 'smartCheckStatus': 'SmartCheck status'},
+                        labels={'applicationCode': 'Kód aplikace (applicationCode)', 'count': 'Počet', 'smartCheckStatus': 'SmartCheck status'},
                         title='SmartCheck statusy aplikací (agregováno přes všechny tenanty)',
                         barmode='group'
                     )
