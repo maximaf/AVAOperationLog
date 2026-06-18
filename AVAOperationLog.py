@@ -1618,8 +1618,11 @@ with tab_usage_stats:
         st.markdown("#### 🗂️ Tenanti používající aplikaci " + application_code.strip())
         st.markdown("""
 <style>
-/* Vyhledáme následující element-container s tabulkou a roztáhneme ji na výšku viewportu */
-div.element-container:has(.usage-stats-marker) + div.element-container div[data-testid="stDataFrame"] {
+/* Vyhledáme následující element-container a roztáhneme tabulku i její vnitřní kontejnery na výšku viewportu */
+div.element-container:has(.usage-stats-marker) + div.element-container div[data-testid="stDataFrame"],
+div.element-container:has(.usage-stats-marker) + div.element-container div[data-testid="stDataFrame"] > div,
+div.element-container:has(.usage-stats-marker) + div.element-container div[data-testid="stDataFrame"] > div > div,
+div.element-container:has(.usage-stats-marker) + div.element-container div[data-testid="stDataFrame"] > div > div > div {
     height: calc(100vh - 400px) !important;
     min-height: 400px !important;
 }
