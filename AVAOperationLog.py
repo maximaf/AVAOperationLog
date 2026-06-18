@@ -298,7 +298,7 @@ def fetch_logs_page(api_url, token, tenant_id, limit, offset, filters=None):
                 dt_to_local = pd.Timestamp(datetime.combine(d_to, t_to)).tz_localize(tz_local)
                 params['createdTo'] = dt_to_local.tz_convert('UTC').strftime('%Y-%m-%dT%H:%M:%SZ')
             
-    response = requests.get(api_url, headers=headers, params=params, timeout=15)
+    response = requests.get(api_url, headers=headers, params=params, timeout=(15,120))
     response.raise_for_status()
     return response.json()
 
@@ -347,7 +347,7 @@ def fetch_input_queue(api_url, token, tenant_id, limit, offset, filters=None):
     else:
         enqueue_url = f"{base_ds_url}/api/v2/SourcingData/EnqueueData"
 
-    response = requests.get(enqueue_url, headers=headers, params=params, timeout=15)
+    response = requests.get(enqueue_url, headers=headers, params=params, timeout=(15,120))
     response.raise_for_status()
     return response.json()
 
@@ -386,7 +386,7 @@ def fetch_output_queue(api_url, token, tenant_id, limit, offset, filters=None):
                 dt_to_local = pd.Timestamp(datetime.combine(d_to, t_to)).tz_localize(tz_local)
                 params['modifiedTo'] = dt_to_local.tz_convert('UTC').strftime('%Y-%m-%dT%H:%M:%SZ')
                 
-    response = requests.get(get_data_url, headers=headers, params=params, timeout=15)
+    response = requests.get(get_data_url, headers=headers, params=params, timeout=(15,120))
     response.raise_for_status()
     return response.json()
 
@@ -401,7 +401,7 @@ def fetch_usage_statistics(api_url, token, tenant_id, application_code):
     params = {}
     if application_code and application_code.strip():
         params['applicationCode'] = application_code.strip()
-    response = requests.get(usage_url, headers=headers, params=params, timeout=15)
+    response = requests.get(usage_url, headers=headers, params=params, timeout=(15,120))
     response.raise_for_status()
     return response.json()
 
@@ -413,7 +413,7 @@ def fetch_integrated_applications(api_url, token, tenant_id):
         'X-Tenant': tenant_id.strip(),
         'Accept': 'application/json'
     }
-    response = requests.get(apps_url, headers=headers, timeout=15)
+    response = requests.get(apps_url, headers=headers, timeout=(15,120))
     response.raise_for_status()
     return response.json()
 
@@ -428,7 +428,7 @@ def fetch_applications_used_by_tenants(api_url, token, tenant_id, include_smart_
     params = {
         'includeSmartCheckStatus': 'true' if include_smart_check_status else 'false'
     }
-    response = requests.get(usage_url, headers=headers, params=params, timeout=15)
+    response = requests.get(usage_url, headers=headers, params=params, timeout=(15,120))
     response.raise_for_status()
     return response.json()
 
