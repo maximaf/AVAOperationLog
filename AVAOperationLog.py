@@ -1616,6 +1616,15 @@ with tab_usage_stats:
             df_usage = df_usage.sort_values(by='tenantName', key=lambda x: x.str.lower()).reset_index(drop=True)
             
         st.markdown("#### 🗂️ Tenanti používající aplikaci " + application_code.strip())
+        st.markdown("""
+<style>
+.usage-stats-table div[data-testid="stDataFrame"] {
+    height: calc(100vh - 360px) !important;
+    min-height: 400px !important;
+}
+</style>
+""", unsafe_allow_html=True)
+        st.markdown('<div class="usage-stats-table">', unsafe_allow_html=True)
         st.dataframe(
             df_usage,
             use_container_width=True,
@@ -1629,6 +1638,7 @@ with tab_usage_stats:
                 'ownerOrgId': st.column_config.TextColumn(label='Id organizace\n(ownerOrgId)')
             }
         )
+        st.markdown('</div>', unsafe_allow_html=True)
     elif application_code.strip():
         st.warning("Pro zadaný Application Code nebyla nalezena žádná data UsageStatistics.")
 
